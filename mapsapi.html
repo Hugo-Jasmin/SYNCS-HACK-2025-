@@ -3,90 +3,232 @@
 <head>
   <title>Parks Locator</title>
   <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
     #map {
       height: 100vh;
       width: 100%;
     }
-    #coords {
+    
+    #info-panel {
       position: absolute;
       top: 10px;
       left: 10px;
       background: white;
-      padding: 8px;
-      border-radius: 4px;
-      font-family: Arial, sans-serif;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
       z-index: 5;
+      min-width: 250px;
+      max-width: 300px;
+    }
+    
+    #info-panel h3 {
+      margin: 0 0 10px 0;
+      color: #2c3e50;
+      font-size: 16px;
+    }
+    
+    .info-item {
+      margin: 8px 0;
+      padding: 6px 0;
+      border-bottom: 1px solid #eee;
+    }
+    
+    .info-item:last-child {
+      border-bottom: none;
+    }
+    
+    .label {
+      font-weight: 600;
+      color: #34495e;
+    }
+    
+    .value {
+      color: #27ae60;
+      font-weight: 500;
+    }
+    
+    .instruction {
+      color: #7f8c8d;
+      font-size: 14px;
+      font-style: italic;
+    }
+    
+    #loading {
+      display: none;
+      color: #3498db;
+      font-style: italic;
     }
   </style>
 </head>
 <body>
-  <div id="coords">Click on the map to get coordinates</div>
+  <div id="info-panel">
+    <h3>🏞️ Parks Locator</h3>
+    <div class="instruction">Click anywhere on the map to find nearby parks</div>
+    <div id="loading">Searching for parks...</div>
+    <div id="coordinates" class="info-item" style="display: none;">
+      <div class="label">Coordinates:</div>
+      <div id="coords-value"></div>
+    </div>
+    <div id="park-count" class="info-item" style="display: none;">
+      <div class="label">Parks Found:</div>
+      <div id="count-value" class="value"></div>
+    </div>
+    <div id="search-radius" class="info-item" style="display: none;">
+      <div class="label">Search Radius:</div>
+      <div class="value">5 km</div>
+    </div>
+  </div>
+  
   <div id="map"></div>
 
   <script>
     let map;
     let service;
     let parkOverlays = [];
+    let clickMarker = null;
 
     function initMap() {
-      const center = { lat: -33.8688, lng: 151.2093 }; // Default center
+      const center = { lat: -33.8688, lng: 151.2093 }; // Sydney, Australia
 
       map = new google.maps.Map(document.getElementById("map"), {
         zoom: 12,
         center: center,
+        styles: [
+          {
+            featureType: "poi.park",
+            elementType: "geometry.fill",
+            stylers: [{ color: "#a8e6a3" }]
+          }
+        ]
       });
+
+      service = new google.maps.places.PlacesService(map);
 
       // Click listener to show coordinates and nearby parks
       map.addListener("click", (event) => {
         const lat = event.latLng.lat();
         const lng = event.latLng.lng();
-        document.getElementById("coords").innerText = `Latitude: ${lat}, Longitude: ${lng}`;
+        
+        // Show loading state
+        document.getElementById("loading").style.display = "block";
+        document.getElementById("coordinates").style.display = "none";
+        document.getElementById("park-count").style.display = "none";
+        document.getElementById("search-radius").style.display = "none";
 
-        // Clear previous overlays
-        parkOverlays.forEach(circle => circle.setMap(null));
-        parkOverlays = [];
+        // Update coordinates display
+        document.getElementById("coords-value").innerText = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 
-        // Search for nearby parks around click
-        const request = {
-          location: { lat, lng },
-          radius: 5000, // 5 km
-          type: ['park']
-        };
+        // Clear previous overlays and marker
+        clearPreviousResults();
 
-        service = new google.maps.places.PlacesService(map);
-        service.nearbySearch(request, (results, status) => {
-          if (status === google.maps.places.PlacesServiceStatus.OK) {
-            // Highlight parks
-            results.forEach(place => {
-              const circle = new google.maps.Circle({
-                strokeColor: "#4CAF50",
-                strokeOpacity: 0.8,
-                strokeWeight: 2,
-                fillColor: "#4CAF50",
-                fillOpacity: 0.35,
-                map: map,
-                center: place.geometry.location,
-                radius: 200
-              });
-              parkOverlays.push(circle);
-            });
-
-            // Update count in coords div
-            document.getElementById("coords").innerText += `\nNearby Parks: ${results.length}`;
-          } else {
-            document.getElementById("coords").innerText += `\nNearby Parks: 0`;
+        // Add marker at click location
+        clickMarker = new google.maps.Marker({
+          position: { lat, lng },
+          map: map,
+          title: "Search Location",
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: "#3498db",
+            fillOpacity: 1,
+            strokeColor: "#2980b9",
+            strokeWeight: 2
           }
         });
+
+        // Search for nearby parks
+        findNearbyParks(lat, lng);
       });
     }
+
+    function findNearbyParks(lat, lng) {
+      const request = {
+        location: { lat, lng },
+        radius: 5000, // 5 km radius
+        type: ['park']
+      };
+
+      service.nearbySearch(request, (results, status) => {
+        // Hide loading
+        document.getElementById("loading").style.display = "none";
+        
+        // Show info panels
+        document.getElementById("coordinates").style.display = "block";
+        document.getElementById("park-count").style.display = "block";
+        document.getElementById("search-radius").style.display = "block";
+
+        if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+          // Update park count
+          document.getElementById("count-value").innerText = `${results.length} parks`;
+
+          // Highlight parks with circles
+          results.forEach((place, index) => {
+            const circle = new google.maps.Circle({
+              strokeColor: "#27ae60",
+              strokeOpacity: 0.8,
+              strokeWeight: 2,
+              fillColor: "#2ecc71",
+              fillOpacity: 0.25,
+              map: map,
+              center: place.geometry.location,
+              radius: 150
+            });
+
+            // Add info window on click
+            const infoWindow = new google.maps.InfoWindow({
+              content: `
+                <div style="padding: 5px;">
+                  <strong>${place.name}</strong><br>
+                  <small>Rating: ${place.rating || 'N/A'} ⭐</small><br>
+                  <small>Type: Park</small>
+                </div>
+              `
+            });
+
+            circle.addListener('click', () => {
+              infoWindow.setPosition(place.geometry.location);
+              infoWindow.open(map);
+            });
+
+            parkOverlays.push(circle);
+          });
+
+          console.log(`Found ${results.length} parks in the area`);
+        } else {
+          document.getElementById("count-value").innerText = "0 parks";
+          console.log('No parks found or search failed:', status);
+        }
+      });
+    }
+
+    function clearPreviousResults() {
+      // Clear park overlays
+      parkOverlays.forEach(circle => circle.setMap(null));
+      parkOverlays = [];
+      
+      // Clear previous marker
+      if (clickMarker) {
+        clickMarker.setMap(null);
+        clickMarker = null;
+      }
+    }
+
+    // Error handling for Maps API
+    window.gm_authFailure = function() {
+      alert('Google Maps authentication failed. Please check your API key.');
+    };
   </script>
 
   <script
-  src="https://maps.googleapis.com/maps/api/js?libraries=places&callback=initMap"
-  async
-  defer
-></script>
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBilkWQHuRPfzNP7Zmfrx76wAl4PIqaNM4&libraries=places&callback=initMap"
+    async
+    defer
+  ></script>
 
 </body>
 </html>
